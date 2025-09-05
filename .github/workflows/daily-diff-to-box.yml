@@ -1,0 +1,44 @@
+# .github/workflows/daily-diff-to-box.yml
+name: Daily Diff to Box
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs every day at midnight UTC
+  workflow_dispatch: # Allow manual trigger too
+
+jobs:
+  send_diff_to_box:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get date 24 hours ago
+        id: get-date
+        run: echo "since_date=$(date -u -d '24 hours ago' +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Get git diff of the last 24 hours
+        id: get-diff
+        run: |
+          git fetch --all
+          echo "Getting commits since: ${{ steps.get-date.outputs.since_date }}"
+          CHANGES=$(git log --since="${{ steps.get-date.outputs.since_date }}" --pretty=format:"%h %s" --name-only)
+          
+          if [ -z "$CHANGES" ]; then
+            echo "No changes in the last 24 hours." > diff_output.txt
+          else
+            echo "$CHANGES" > diff_output.txt
+          fi
+
+      - name: Upload to Box
+        env:
+          BOX_ACCESS_TOKEN: ${{ secrets.BOX_ACCESS_TOKEN }}
+          BOX_FOLDER_ID: 'YOUR_BOX_FOLDER_ID'
+        run: |
+          FILENAME="code_changes_$(date +'%Y-%m-%d').txt"
+          
+          curl -X POST https://upload.box.com/api/2.0/files/content \
+            -H "Authorization: Bearer $BOX_ACCESS_TOKEN" \
+            -F attributes="{\"name\":\"$FILENAME\", \"parent\":{\"id\":\"$BOX_FOLDER_ID\"}}" \
+            -F file=@diff_output.txt
